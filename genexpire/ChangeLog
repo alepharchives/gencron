@@ -1,0 +1,11 @@
+Version 0.0.3
+  * Google code release.
+
+Version 0.0.2
+  * Package includes erlrc hooks.
+
+Version 0.0.1
+  * Dep on gencron.
+
+Version 0.0.0
+  * Initial version.

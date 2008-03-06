@@ -1,0 +1,4 @@
+@author Paul Mineiro <paul@n54.com>
+@copyright 2008 N54, Inc.
+@title genexpire
+@doc Provides a method for limiting the space utilization of mnesia databases.

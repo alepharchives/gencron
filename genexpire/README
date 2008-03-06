@@ -1,0 +1,2 @@
+genexpire provides a method for limiting the resource utilization of
+mnesia databases.
