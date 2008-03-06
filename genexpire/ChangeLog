@@ -1,3 +1,6 @@
+Version 0.0.4
+  * Eliminate quickcheck dependency.
+
 Version 0.0.3
   * Google code release.
 

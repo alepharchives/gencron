@@ -21,7 +21,6 @@
            delete/3,
            finish/1 ]).
 
--include_lib ("flasscheck/include/quickcheck.hrl").
 -include_lib ("eunit/include/eunit.hrl").
 -include ("gen_expire.hrl").
 
@@ -339,6 +338,21 @@ random_string (Size) ->
 %-                                Tests                                -
 %-=====================================================================-
 
+% ok, don't want to depend upon quickcheck, so here's some cheese
+
+-define (FORALL (Var, Gen, Cond), fun (A) -> Var = (Gen) (A), Cond end).
+
+flasscheck (N, Limit, P) -> flasscheck (1, N, math:log (Limit), P).
+
+flasscheck (M, N, LogLimit, P) when M =< N -> 
+  Size = trunc (math:exp (LogLimit * M / N)),
+  true = P (Size),
+  io:format (".", []),
+  flasscheck (M + 1, N, LogLimit, P);
+flasscheck (_, N, _, _) -> 
+  io:format ("~n~p tests passed~n", [ N ]),
+  ok.
+
 expire_test_ () ->
   F = fun () ->
     T = ?FORALL (X,
@@ -427,7 +441,7 @@ expire_test_ () ->
                     true
                   end) (X)),
 
-    ok = fc:flasscheck (200, 10, T)
+    ok = flasscheck (200, 10, T)
   end,
 
   { setup,
