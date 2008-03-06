@@ -1,0 +1,5 @@
+@author Paul Mineiro
+@copyright 2008, Released under New BSD License.
+@title gencron
+@doc Provides gen_cron, a periodic command execution server.
+@reference <a href="http://www.opensource.org/licenses/bsd-license.php">New BSD License</a>.
