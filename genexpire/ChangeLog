@@ -1,3 +1,6 @@
+Version 0.0.5:
+  * Actually enforce bytes, not words.
+
 Version 0.0.4
   * Eliminate quickcheck dependency.
 

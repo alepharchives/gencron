@@ -274,7 +274,7 @@ expire_frag (Table, MaxFragBytes, State) ->
 expire_frag (_Table, _MaxFragBytes, State, { end_of_table, _ }) ->
   State;
 expire_frag (Table, MaxFragBytes, State, { ok, Key, _ }) ->
-  case mnesia:table_info (Table, memory) of
+  case memory_bytes (Table) of
     N when N > MaxFragBytes ->
       Next = (State#genexpire.module):next (Table, Key, State#genexpire.state),
       NewState = case Next of { end_of_table, X } -> X; { ok, _, X } -> X end,
@@ -305,6 +305,10 @@ local_fragments (TableName) ->
   [ F || N <- lists:seq (1, num_fragments (TableName)),
          F <- [ frag_table_name (TableName, N) ],
          is_local (F) ].
+
+memory_bytes (Table) ->
+  WordSize = erlang:system_info (wordsize),
+  WordSize * mnesia:table_info (Table, memory).
 
 num_fragments (Tablename) ->
   { value, { n_fragments, N } } =
@@ -382,7 +386,7 @@ expire_test_ () ->
                                               { frag_properties, [ 
                                                 { n_fragments, Frags } ] } ]),
 
-                    InitSize = mnesia:table_info (Tab, memory),
+                    InitSize = memory_bytes (Tab),
 
                     if Empty -> 
                          Sizes = [];
@@ -391,7 +395,7 @@ expire_test_ () ->
                            [ begin
                                mnesia:dirty_write (Tab, { Tab, Key, Value }),
                                mnesia:dirty_write (TabDup, { Tab, Key, Value }),
-                               mnesia:table_info (Tab, memory)
+                               memory_bytes (Tab)
                              end ||
                              { Key, Value } <- Terms ]
                     end,
@@ -416,7 +420,7 @@ expire_test_ () ->
                       { 'DOWN', MRef, _, _, _ } -> ok
                     end,
 
-                    ?assert (mnesia:table_info (Tab, memory) =:=
+                    ?assert (memory_bytes (Tab) =:=
                              case { Keep, Empty } of
                                { _, true } -> InitSize;
                                { all, false } -> lists:last (Sizes);
@@ -424,8 +428,8 @@ expire_test_ () ->
                                { _, false } -> lists:nth (Keep, Sizes)
                              end),
 
-                    ?assert (mnesia:table_info (TabDup, memory) =:=
-                             mnesia:table_info (Tab, memory)),
+                    ?assert (memory_bytes (TabDup) =:=
+                             memory_bytes (Tab)),
 
                     gen_expire_test:stop (Pid),
 
