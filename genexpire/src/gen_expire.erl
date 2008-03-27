@@ -20,8 +20,15 @@
            next/3,
            delete/3,
            finish/1 ]).
+-ifdef (HAVE_APPINSPECT).
+-behaviour (appinspect).
+-export ([ inspect/0 ]).
+-endif.
 
+-ifdef (HAVE_EUNIT).
 -include_lib ("eunit/include/eunit.hrl").
+-endif.
+
 -include ("gen_expire.hrl").
 
 -define (is_timeout (X), (((X) =:= infinity) orelse 
@@ -95,6 +102,17 @@ start_link (ServerName, Module, Interval, Args, Options) when ?is_timeout (Inter
                        Interval,
                        [ Module | Args ],
                        Options).
+
+%-=====================================================================-
+%-                         appinspect callbacks                        -
+%-=====================================================================-
+
+inspect () ->
+  [ { active_processes, 
+      [ { P, erlang:process_info (P) } || 
+         P <- erlang:processes (), 
+         { initial_call, { gen_expire, _, _ } } <- 
+           [ erlang:process_info (P, initial_call) ] ] } ].
 
 %-=====================================================================-
 %-                         gen_expire callbacks                        -

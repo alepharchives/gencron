@@ -1,3 +1,6 @@
+Version 0.0.6:
+  * appinspect hook.
+
 Version 0.0.5:
   * Actually enforce bytes, not words.
 
