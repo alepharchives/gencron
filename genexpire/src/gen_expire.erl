@@ -103,6 +103,8 @@ start_link (ServerName, Module, Interval, Args, Options) when ?is_timeout (Inter
                        [ Module | Args ],
                        Options).
 
+-ifdef (HAVE_APPINSPECT).
+
 %-=====================================================================-
 %-                         appinspect callbacks                        -
 %-=====================================================================-
@@ -113,6 +115,8 @@ inspect () ->
          P <- erlang:processes (), 
          { initial_call, { gen_expire, _, _ } } <- 
            [ erlang:process_info (P, initial_call) ] ] } ].
+
+-endif.
 
 %-=====================================================================-
 %-                         gen_expire callbacks                        -
