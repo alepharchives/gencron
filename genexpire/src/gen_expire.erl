@@ -109,6 +109,8 @@ start_link (ServerName, Module, Interval, Args, Options) when ?is_timeout (Inter
 %-                         appinspect callbacks                        -
 %-=====================================================================-
 
+%% @hidden
+
 inspect () ->
   [ { active_processes, 
       [ { P, erlang:process_info (P) } || 
