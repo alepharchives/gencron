@@ -1,6 +1,7 @@
 # put whatever (auto)make commands here, they will be included from Makefile.am
 
 ERLCFLAGS = $(FW_ERLCFLAGS) @APPINSPECT@
+DIALYZERFLAGS = @APPINSPECT@
 
 dist_erlappsrc_DATA = 		\
   $(wildcard *.erl)

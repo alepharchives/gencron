@@ -2,7 +2,7 @@ dnl -- include additional autoconf commands here
 dnl -- do not include AC_OUTPUT, this is called for you
 
 FW_TEMPLATE_ERLANG_CHECK_MODULE([appinspect], 
-                                [APPINSPECT="-D HAVE_APPINSPECT=1"],
+                                [APPINSPECT="-DHAVE_APPINSPECT=1"],
 				[APPINSPECT=""])
 
 AC_SUBST([APPINSPECT])
