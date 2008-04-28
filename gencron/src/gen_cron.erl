@@ -281,7 +281,7 @@ tick_test_ () ->
 
         ?assert (ets:lookup (Tab, count) =:= [{ count, 2 }]),
         ?assert (ets:lookup (Tab, force) =:= [{ force, 1 }]),
-        ?assert (ets:lookup (Tab, tick_monitor) =:= [{ tick_monitor, 3 }]),
+        ?assert (ets:lookup (Tab, tick_monitor) =:= [{ tick_monitor, 2 }]),
         ?assert (ets:lookup (Tab, mega) =:= []),
         ?assert (ets:lookup (Tab, turg) =:= []),
         true
