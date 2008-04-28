@@ -176,7 +176,7 @@ handle_info (Msg, State) ->
 %% @end
 
 terminate (Reason, State) ->
-  (State#gencron.module):terminate (Reason, State),
+  (State#gencron.module):terminate (Reason, State#gencron.state),
   case State#gencron.mref of
     undefined -> ok;
     MRef -> receive { 'DOWN', MRef, _, _, _ } -> ok end
