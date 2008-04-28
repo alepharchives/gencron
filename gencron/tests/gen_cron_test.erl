@@ -19,9 +19,11 @@ init ([ Tab ]) ->
   { ok, Tab }.
 
 handle_tick (force, Tab) ->
+  process_flag (trap_exit, true),
   receive after 2000 -> ok end,
   ets:update_counter (Tab, force, 1);
 handle_tick (tick, Tab) ->
+  process_flag (trap_exit, true),
   receive after 2000 -> ok end,
   ets:update_counter (Tab, count, 1).
 

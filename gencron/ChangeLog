@@ -1,3 +1,6 @@
+=Version 0.1.6=
+  * Revert to version 0.1.4 strategy, but forward exit to spawned process.
+
 =Version 0.1.5=
   * Call module:terminate before waiting on subprocess.
 

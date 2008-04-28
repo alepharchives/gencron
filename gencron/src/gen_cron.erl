@@ -172,15 +172,26 @@ handle_info (Msg, State) ->
 %% @spec terminate (Result, State) -> Result
 %% @doc Just like the gen_server version, except that 
 %% if a process is running, we wait for it to terminate
-%% (after calling the module's terminate).
+%% (prior to calling the module's terminate).
 %% @end
 
 terminate (Reason, State) ->
-  (State#gencron.module):terminate (Reason, State#gencron.state),
-  case State#gencron.mref of
-    undefined -> ok;
-    MRef -> receive { 'DOWN', MRef, _, _, _ } -> ok end
-  end.
+  NewState = 
+    case State#gencron.mref of
+      undefined -> 
+        State#gencron.state;
+      MRef -> 
+        exit (State#gencron.pid, Reason),
+        receive Msg = { 'DOWN', MRef, _, _, _ } -> 
+          case (State#gencron.module):handle_info ({ tick_monitor, Msg }, 
+                                                   State#gencron.state) of
+            { noreply, NS } -> NS;
+            { noreply, NS, _ } -> NS;
+            { stop, _, NS } -> NS
+          end
+        end
+    end,
+  (State#gencron.module):terminate (Reason, NewState).
 
 %% @spec code_change (OldVsn, State, Extra) -> Result
 %% @doc Just like the gen_server version.
@@ -281,7 +292,7 @@ tick_test_ () ->
 
         ?assert (ets:lookup (Tab, count) =:= [{ count, 2 }]),
         ?assert (ets:lookup (Tab, force) =:= [{ force, 1 }]),
-        ?assert (ets:lookup (Tab, tick_monitor) =:= [{ tick_monitor, 2 }]),
+        ?assert (ets:lookup (Tab, tick_monitor) =:= [{ tick_monitor, 3 }]),
         ?assert (ets:lookup (Tab, mega) =:= []),
         ?assert (ets:lookup (Tab, turg) =:= []),
         true
