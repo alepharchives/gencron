@@ -22,6 +22,6 @@ FW_PACKAGE_REPLACES=""
 FW_PACKAGE_BUILD_DEPENDS="eunit"
 FW_PACKAGE_BUILD_CONFLICTS=""
 
-FW_DUPLOAD_ARGS=${FW_DUPLOAD_ARGS-"-t myarchive"}
+FW_DUPLOAD_ARGS=${FW_DUPLOAD_ARGS-"-t dukes"}
 
 FW_SUBVERSION_TAG_ROOT="https://gencron.googlecode.com/svn/tags/gencron"
