@@ -172,25 +172,15 @@ handle_info (Msg, State) ->
 %% @spec terminate (Result, State) -> Result
 %% @doc Just like the gen_server version, except that 
 %% if a process is running, we wait for it to terminate
-%% (prior to calling the module's terminate).
+%% (after calling the module's terminate).
 %% @end
 
 terminate (Reason, State) ->
-  NewState = 
-    case State#gencron.mref of
-      undefined -> 
-        State#gencron.state;
-      MRef -> 
-        receive Msg = { 'DOWN', MRef, _, _, _ } -> 
-          case (State#gencron.module):handle_info ({ tick_monitor, Msg }, 
-                                                   State#gencron.state) of
-            { noreply, NS } -> NS;
-            { noreply, NS, _ } -> NS;
-            { stop, _, NS } -> NS
-          end
-        end
-    end,
-  (State#gencron.module):terminate (Reason, NewState).
+  (State#gencron.module):terminate (Reason, State),
+  case State#gencron.mref of
+    undefined -> ok;
+    MRef -> receive { 'DOWN', MRef, _, _, _ } -> ok end
+  end.
 
 %% @spec code_change (OldVsn, State, Extra) -> Result
 %% @doc Just like the gen_server version.
