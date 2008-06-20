@@ -266,7 +266,9 @@ reset_timer (Interval) ->
 tick_interval (Interval) when is_integer (Interval) -> 
   Interval;
 tick_interval ({ cluster, Interval }) when is_integer (Interval) ->
-  tick_interval (Interval) * length ([ node () | nodes () ]).
+  NodeCount = length ([ node () | nodes () ]),
+  Spread = random:uniform (NodeCount),
+  (tick_interval (Interval) * 2 * (1 + Spread)) div (3 + NodeCount).
 
 wrap ({ reply, Reply, NewState }, State) ->
   { reply, Reply, State#gencronv2{ state = NewState } };
@@ -301,7 +303,7 @@ infinity_test_ () ->
         { ok, RunPid } = gen_cron:force_run (Pid),
         { underway, RunPid } = gen_cron:force_run (Pid),
   
-        receive after 6800 -> ok end,
+        receive after 6500 -> ok end,
   
         exit (Pid, shutdown),
   
@@ -337,7 +339,7 @@ cluster_tick_test_ () ->
         { ok, RunPid } = gen_cron:force_run (Pid),
         { underway, RunPid } = gen_cron:force_run (Pid),
   
-        receive after 6800 -> ok end,
+        receive after 6500 -> ok end,
   
         exit (Pid, shutdown),
   
@@ -372,7 +374,7 @@ tick_test_ () ->
         { ok, RunPid } = gen_cron:force_run (Pid),
         { underway, RunPid } = gen_cron:force_run (Pid),
   
-        receive after 6800 -> ok end,
+        receive after 6500 -> ok end,
   
         exit (Pid, shutdown),
   
