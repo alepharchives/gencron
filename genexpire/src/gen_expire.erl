@@ -25,6 +25,18 @@
 -export ([ inspect/0 ]).
 -endif.
 
+-ifdef (MNESIA_EXT).
+-define (if_mnesia_ext (X, Y), X).
+-ifdef (TCERL).
+-define (if_mnesia_ext_and_tcerl (X, Y), X).
+-else.
+-define (if_mnesia_ext_and_tcerl (X, Y), Y).
+-endif.
+-else.
+-define (if_mnesia_ext (X, Y), Y).
+-define (if_mnesia_ext_and_tcerl (X, Y), Y).
+-endif.
+
 -ifdef (HAVE_EUNIT).
 -include_lib ("eunit/include/eunit.hrl").
 -endif.
@@ -321,9 +333,13 @@ frag_table_name (Tab, N) ->
   list_to_atom (atom_to_list (Tab) ++ "_frag" ++ integer_to_list (N)).
 
 is_local (TableName) ->
-  lists:member (node (), mnesia:table_info (TableName, disc_copies)) orelse
-  lists:member (node (), mnesia:table_info (TableName, disc_only_copies)) orelse
-  lists:member (node (), mnesia:table_info (TableName, ram_copies)).
+  lists:member (node (),
+                mnesia:table_info (TableName, disc_copies) ++
+                mnesia:table_info (TableName, disc_only_copies) ++
+                mnesia:table_info (TableName, ram_copies) ++
+                ?if_mnesia_ext (
+                  mnesia:table_info (TableName, external_copies),
+                  [])).
                        
 local_fragments (TableName) ->
   [ F || N <- lists:seq (1, num_fragments (TableName)),
@@ -401,14 +417,34 @@ expire_test_ () ->
 
                     { atomic, ok } = 
                        mnesia:create_table (Tab, 
-                                            [ { frag_properties, [ 
-                                                { n_fragments, Frags } ] } ]),
+                                            [ ?if_mnesia_ext_and_tcerl (
+                                                { type, { external,
+                                                          ordered_set,
+                                                          tcbdbtab } },
+                                                { type, set }),
+                                              { frag_properties, [ 
+                                                { n_fragments, Frags },
+                                                { node_pool, mnesia:system_info (running_db_nodes) },
+                                                ?if_mnesia_ext_and_tcerl (
+                                                  { n_external_copies, 1 },
+                                                  { n_ram_copies, 1 })
+                                                ] } ]),
 
                     { atomic, ok } = 
                        mnesia:create_table (TabDup, 
                                             [ { record_name, Tab },
+                                              ?if_mnesia_ext_and_tcerl (
+                                                { type, { external,
+                                                          ordered_set,
+                                                          tcbdbtab } },
+                                                { type, set }),
                                               { frag_properties, [ 
-                                                { n_fragments, Frags } ] } ]),
+                                                { node_pool, mnesia:system_info (running_db_nodes) },
+                                                { n_fragments, Frags },
+                                                ?if_mnesia_ext_and_tcerl (
+                                                  { n_external_copies, 1 },
+                                                  { n_ram_copies, 1 })
+                                                ] } ]),
 
                     InitSize = memory_bytes (Tab),
 
@@ -473,8 +509,17 @@ expire_test_ () ->
   end,
 
   { setup,
-    fun () -> os:cmd ("rm -rf Mnesia*"), mnesia:start () end,
-    fun (_) -> mnesia:stop (), os:cmd ("rm -rf Mnesia*") end,
+    fun () -> os:cmd ("rm -rf Mnesia*"), 
+              ?if_mnesia_ext_and_tcerl (tcerl:start (), ok),
+              mnesia:start (),
+              ?if_mnesia_ext_and_tcerl (
+                mnesia:change_table_copy_type (schema, node (), disc_copies),
+                ok)
+    end,
+    fun (_) -> mnesia:stop (), 
+               ?if_mnesia_ext_and_tcerl (tcerl:stop (), ok),
+               os:cmd ("rm -rf Mnesia*") 
+    end,
     { timeout, 60, F } 
   }.
 
