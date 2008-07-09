@@ -1,5 +1,5 @@
 -module (gen_expire_test).
--export ([ start_link/3, stop/1 ]).
+-export ([ start_link/3, start_link/4, stop/1 ]).
 -behaviour (gen_expire).
 -export ([ activity_context/2,
            first/2,
@@ -23,6 +23,9 @@
 
 start_link (Interval, Limit, Tab) ->
   gen_expire:start_link (?MODULE, Interval, [ Limit, Tab ], []).
+
+start_link (Interval, Limit, Tab, size) ->
+  gen_expire:start_link (?MODULE, Interval, [ Limit, Tab, size ], []).
 
 stop (ServerRef) ->
   gen_server:cast (ServerRef, stop).
@@ -71,6 +74,10 @@ finish (#mega{ expect = Expect }) when Expect =:= finish orelse
 init ([ Limit, Tab ]) ->
   { ok, 
     [ #expirespec{ table = Tab, max_bytes_per_box = Limit } ],
+    #mega{ expect = activity_context } };
+init ([ Limit, Tab, size ]) ->
+  { ok, 
+    [ #expirespecv2{ table = Tab, limit = { entries_per_box, Limit } } ],
     #mega{ expect = activity_context } }.
 
 handle_call (_Request, _From, State) -> { noreply, State }.

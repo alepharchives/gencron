@@ -48,7 +48,11 @@
 
 -record (genexpire, { module, speclist, state }).
 
-%% @type expirespec() = { expirespec, Table::atom (), MaxBytesPerBox::integer () }.  This is the record type #expirespec{ table, max_bytes_per_box }.
+%% @type expirespec() = { expirespec, Table::atom (), MaxBytesPerBox::integer () }.  This is the record type #expirespec{ table, max_bytes_per_box }.  Maintained for backwards compatibility.  Equivalent to expirespecv2 with a limitspec of bytes_per_box type.
+
+%% @type limitspec() = { bytes_per_box, MaxBytesPerBox::integer () } | { entries_per_box, MaxEntriesPerBox::integer () }.
+
+%% @type expirespecv2() = { expirespecv2, Table::atom (), Limit::limitspec () }.  This is the record type #expirespecv2{ table, limit }.
 
 %-=====================================================================-
 %-                                Public                               -
@@ -185,12 +189,13 @@ finish (_State) ->
 %-=====================================================================-
 
 %% @spec init (Args) -> result ()
-%%   result () = { ok, Tabs::list (#expirespec{}), State::any () } |
-%%               { ok, Tabs::list (#expirespec{}), State::any (), Timeout::integer () } |
+%%   result () = { ok, Tabs::list (#expirespecv2{}), State::any () } |
+%%               { ok, Tabs::list (#expirespecv2{}), State::any (), Timeout::integer () } |
 %%               { stop, Reason::any () } |
 %%               ignore
 %% @doc Initialization routine.  Like Module:init/1 for gen_server, except
-%% that a list of #expirespec{} is returned to control expiration behavior.
+%% that a list of #expirespecv2{} is returned to control 
+%% expiration behavior.
 %% @end
 
 init ([ Module | Args ]) ->
@@ -254,33 +259,64 @@ terminate (Reason, State) ->
 %% @hidden
 
 handle_tick (_Reason, State) ->
-  FinalState = 
-    lists:foldl (fun (#expirespec{ table = Table, 
-                                   max_bytes_per_box = MaxBytes },
-                      State2) ->
-                   LocalFragments = local_fragments (Table),
-
-                   case LocalFragments of
-                     [] ->
-                       State2;
-                     _ ->
-                       MaxFragBytes = MaxBytes div length (LocalFragments),
-                       lists:foldl (fun (F, State3) ->
-                                      expire_frag (F, MaxFragBytes, State3)
-                                    end,
-                                    State2,
-                                    LocalFragments)
-                   end
-                 end,
-                 State,
-                 State#genexpire.speclist),
+  FinalState = lists:foldl (fun enforce_spec/2,
+                            State,
+                            State#genexpire.speclist),
   (FinalState#genexpire.module):finish (FinalState#genexpire.state).
 
 %-=====================================================================-
 %-                               Private                               -
 %-=====================================================================-
 
-expire_frag (Table, MaxFragBytes, State) ->
+enforce_spec (#expirespec{ table = Table,
+                           max_bytes_per_box = MaxBytes },
+                           State2) ->
+  enforce_spec (#expirespecv2{ table = Table,
+                               limit = { bytes_per_box, MaxBytes } },
+                State2);
+enforce_spec (#expirespecv2{ table = Table,
+                             limit = { bytes_per_box, MaxBytes } },
+              State2) ->
+  LocalFragments = local_fragments (Table),
+
+  case LocalFragments of
+    [] ->
+      State2;
+    _ ->
+      MaxFragBytes = MaxBytes div length (LocalFragments),
+      lists:foldl (fun (F, State3) ->
+                     expire_frag_bytes (F, MaxFragBytes, State3)
+                   end,
+                   State2,
+                   LocalFragments)
+  end;
+enforce_spec (#expirespecv2{ table = Table,
+                             limit = { entries_per_box, MaxEntries } },
+              State2) ->
+  LocalFragments = local_fragments (Table),
+
+  case LocalFragments of
+    [] ->
+      State2;
+    _ ->
+      MaxFragEntries = MaxEntries div length (LocalFragments),
+      lists:foldl (fun (F, State3) ->
+                     expire_frag_entries (F, MaxFragEntries, State3)
+                   end,
+                   State2,
+                   LocalFragments)
+  end.
+
+entries (Table) ->
+  mnesia:table_info (Table, size).
+
+expire_frag_bytes (Table, MaxFragBytes, State) ->
+  expire_frag (Table, fun (T) -> memory_bytes (T) > MaxFragBytes end, State).
+
+expire_frag_entries (Table, MaxEntries, State) ->
+  expire_frag (Table, fun (T) -> entries (T) > MaxEntries end, State).
+
+expire_frag (Table, LimitFun, State) ->
   LockId = { { ?MODULE, Table }, self () },
 
   global:set_lock (LockId),
@@ -298,7 +334,7 @@ expire_frag (Table, MaxFragBytes, State) ->
              State#genexpire{ state = NewState2 };
            { ok, _, NewState2 } ->
               expire_frag (Table,
-                           MaxFragBytes,
+                           LimitFun,
                            State#genexpire{ state = NewState2 },
                            First)
          end
@@ -307,11 +343,11 @@ expire_frag (Table, MaxFragBytes, State) ->
     global:del_lock (LockId)
   end.
 
-expire_frag (_Table, _MaxFragBytes, State, { end_of_table, _ }) ->
+expire_frag (_Table, _LimitFun, State, { end_of_table, _ }) ->
   State;
-expire_frag (Table, MaxFragBytes, State, { ok, Key, _ }) ->
-  case memory_bytes (Table) of
-    N when N > MaxFragBytes ->
+expire_frag (Table, LimitFun, State, { ok, Key, _ }) ->
+  case LimitFun (Table) of
+    true ->
       Next = (State#genexpire.module):next (Table, Key, State#genexpire.state),
       NewState = case Next of { end_of_table, X } -> X; { ok, _, X } -> X end,
 
@@ -319,11 +355,8 @@ expire_frag (Table, MaxFragBytes, State, { ok, Key, _ }) ->
                                                            Key,
                                                            NewState),
 
-      expire_frag (Table, 
-                   MaxFragBytes, 
-                   State#genexpire{ state = NewState2 },
-                   Next);
-    _ ->
+      expire_frag (Table, LimitFun, State#genexpire{ state = NewState2 }, Next);
+    false ->
       State
   end.
 
@@ -522,5 +555,133 @@ expire_test_ () ->
     end,
     { timeout, 60, F } 
   }.
+
+expire_entries_test_ () ->
+  F = fun () ->
+    T = ?FORALL (X,
+                 fun (Size) -> 
+                  { random_atom (Size), 
+                    random:uniform (Size),
+                    random:uniform (8) =:= 1,
+                    case random:uniform (8) of 
+                      1 -> all;
+                      2 -> none;
+                      _ -> random:uniform (Size)
+                    end,
+                    [ { N, random_string (Size) } 
+                      || N <- lists:seq (1, Size) ] }
+                 end,
+                 (fun ({ Tab, Frags, Empty, Keep, Terms }) ->
+                    TabDup = list_to_atom (atom_to_list (Tab) ++ "_dup"),
+
+                    { atomic, ok } = 
+                       mnesia:create_table (Tab, 
+                                            [ ?if_mnesia_ext_and_tcerl (
+                                                { type, { external,
+                                                          ordered_set,
+                                                          tcbdbtab } },
+                                                { type, set }),
+                                              { frag_properties, [ 
+                                                { n_fragments, Frags },
+                                                { node_pool, mnesia:system_info (running_db_nodes) },
+                                                ?if_mnesia_ext_and_tcerl (
+                                                  { n_external_copies, 1 },
+                                                  { n_ram_copies, 1 })
+                                                ] } ]),
+
+                    { atomic, ok } = 
+                       mnesia:create_table (TabDup, 
+                                            [ { record_name, Tab },
+                                              ?if_mnesia_ext_and_tcerl (
+                                                { type, { external,
+                                                          ordered_set,
+                                                          tcbdbtab } },
+                                                { type, set }),
+                                              { frag_properties, [ 
+                                                { node_pool, mnesia:system_info (running_db_nodes) },
+                                                { n_fragments, Frags },
+                                                ?if_mnesia_ext_and_tcerl (
+                                                  { n_external_copies, 1 },
+                                                  { n_ram_copies, 1 })
+                                                ] } ]),
+
+                    InitSize = entries (Tab),
+
+                    if Empty -> 
+                         Sizes = [];
+                       true ->
+                         Sizes = 
+                           [ begin
+                               mnesia:dirty_write (Tab, { Tab, Key, Value }),
+                               mnesia:dirty_write (TabDup, { Tab, Key, Value }),
+                               entries (Tab)
+                             end ||
+                             { Key, Value } <- Terms ]
+                    end,
+
+                    { ok, Pid } = 
+                       gen_expire_test:start_link 
+                         (1000,
+                          case { Keep, Empty } of
+                            { _, true } -> Frags * InitSize;
+                            { all, false } -> Frags * lists:last (Sizes);
+                            { none, false } -> Frags * InitSize;
+                            { _, false } -> Frags * lists:nth (Keep, Sizes)
+                          end,
+                          Tab,
+                          size),
+
+                    { ok, ExpPid } = gen_expire:force_run (Pid),
+                    { underway, ExpPid } = gen_expire:force_run (Pid),
+
+                    MRef = erlang:monitor (process, ExpPid),
+
+                    receive
+                      { 'DOWN', MRef, _, _, _ } -> ok
+                    end,
+
+                    ?assert (entries (Tab) =:=
+                             case { Keep, Empty } of
+                               { _, true } -> InitSize;
+                               { all, false } -> lists:last (Sizes);
+                               { none, false } -> InitSize;
+                               { _, false } -> lists:nth (Keep, Sizes)
+                             end),
+
+                    ?assert (entries (TabDup) =:=
+                             entries (Tab)),
+
+                    gen_expire_test:stop (Pid),
+
+                    MRef2 = erlang:monitor (process, Pid),
+
+                    receive
+                      { 'DOWN', MRef2, _, _, _ } -> ok
+                    end,
+
+                    mnesia:delete_table (Tab),
+                    mnesia:delete_table (TabDup),
+
+                    true
+                  end) (X)),
+
+    ok = flasscheck (200, 10, T)
+  end,
+
+  { setup,
+    fun () -> os:cmd ("rm -rf Mnesia*"), 
+              ?if_mnesia_ext_and_tcerl (tcerl:start (), ok),
+              mnesia:start (),
+              ?if_mnesia_ext_and_tcerl (
+                mnesia:change_table_copy_type (schema, node (), disc_copies),
+                ok)
+    end,
+    fun (_) -> mnesia:stop (), 
+               ?if_mnesia_ext_and_tcerl (tcerl:stop (), ok),
+               os:cmd ("rm -rf Mnesia*") 
+    end,
+    { timeout, 60, F } 
+  }.
+
 
 -endif.
