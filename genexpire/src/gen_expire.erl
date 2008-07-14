@@ -277,15 +277,20 @@ enforce_spec (#expirespec{ table = Table,
 enforce_spec (#expirespecv2{ table = Table,
                              limit = { bytes_per_box, MaxBytes } },
               State2) ->
+  enforce_spec (#expirespecv2 { table = Table,
+				limit = { bytes_per_box, MaxBytes, none } },
+                State2);
+enforce_spec (#expirespecv2{ table = Table,
+                             limit = { bytes_per_box, MaxBytes, UserExpire } },
+              State2) ->
   LocalFragments = local_fragments (Table),
-
   case LocalFragments of
     [] ->
       State2;
     _ ->
       MaxFragBytes = MaxBytes div length (LocalFragments),
       lists:foldl (fun (F, State3) ->
-                     expire_frag_bytes (F, MaxFragBytes, State3)
+                     expire_frag_bytes (F, MaxFragBytes, UserExpire, State3)
                    end,
                    State2,
                    LocalFragments)
@@ -293,15 +298,20 @@ enforce_spec (#expirespecv2{ table = Table,
 enforce_spec (#expirespecv2{ table = Table,
                              limit = { entries_per_box, MaxEntries } },
               State2) ->
+  enforce_spec (#expirespecv2{ table = Table,
+			       limit = { entries_per_box, MaxEntries, none } },
+		State2);
+enforce_spec (#expirespecv2{ table = Table,
+                             limit = { entries_per_box, MaxEntries, UserExpire } },
+              State2) ->
   LocalFragments = local_fragments (Table),
-
   case LocalFragments of
     [] ->
       State2;
     _ ->
       MaxFragEntries = MaxEntries div length (LocalFragments),
       lists:foldl (fun (F, State3) ->
-                     expire_frag_entries (F, MaxFragEntries, State3)
+                     expire_frag_entries (F, MaxFragEntries, UserExpire, State3)
                    end,
                    State2,
                    LocalFragments)
@@ -310,11 +320,25 @@ enforce_spec (#expirespecv2{ table = Table,
 entries (Table) ->
   mnesia:table_info (Table, size).
 
-expire_frag_bytes (Table, MaxFragBytes, State) ->
-  expire_frag (Table, fun (T) -> memory_bytes (T) > MaxFragBytes end, State).
+expire_frag_bytes (Table, MaxFragBytes, none, State) ->
+  expire_frag (Table, fun (T) -> memory_bytes (T) > MaxFragBytes end, State);
+expire_frag_bytes (Table, MaxFragBytes, UserExpire, State)
+	when is_function (UserExpire) ->
+  expire_frag (Table,
+	       fun (T) ->
+		 memory_bytes (T) > MaxFragBytes orelse UserExpire (T)
+	       end,
+	       State).
 
-expire_frag_entries (Table, MaxEntries, State) ->
-  expire_frag (Table, fun (T) -> entries (T) > MaxEntries end, State).
+expire_frag_entries (Table, MaxFragEntries, none, State) ->
+  expire_frag (Table, fun (T) -> entries (T) > MaxFragEntries end, State);
+expire_frag_entries (Table, MaxFragEntries, UserExpire, State)
+	when is_function (UserExpire) ->
+  expire_frag (Table,
+	       fun (T) ->
+		 entries (T) > MaxFragEntries orelse UserExpire (T)
+	       end,
+	       State).
 
 expire_frag (Table, LimitFun, State) ->
   LockId = { { ?MODULE, Table }, self () },
@@ -683,5 +707,135 @@ expire_entries_test_ () ->
     { timeout, 60, F } 
   }.
 
+expire_user_test_ () ->
+  F = fun () ->
+    T = ?FORALL (X,
+                 fun (Size) -> 
+                  { random_atom (Size), 
+                    random:uniform (Size),
+                    random:uniform (8) =:= 1,
+                    case random:uniform (8) of 
+                      1 -> all;
+                      2 -> none;
+                      _ -> random:uniform (Size)
+                    end,
+                    [ { N, random_string (Size) } 
+                      || N <- lists:seq (1, Size) ] }
+                 end,
+                 (fun ({ Tab, Frags, Empty, Keep, Terms }) ->
+                    TabDup = list_to_atom (atom_to_list (Tab) ++ "_dup"),
+
+                    { atomic, ok } = 
+                       mnesia:create_table (Tab, 
+                                            [ ?if_mnesia_ext_and_tcerl (
+                                                { type, { external,
+                                                          ordered_set,
+                                                          tcbdbtab } },
+                                                { type, set }),
+                                              { frag_properties, [ 
+                                                { n_fragments, Frags },
+                                                { node_pool, mnesia:system_info (running_db_nodes) },
+                                                ?if_mnesia_ext_and_tcerl (
+                                                  { n_external_copies, 1 },
+                                                  { n_ram_copies, 1 })
+                                                ] } ]),
+
+                    { atomic, ok } = 
+                       mnesia:create_table (TabDup, 
+                                            [ { record_name, Tab },
+                                              ?if_mnesia_ext_and_tcerl (
+                                                { type, { external,
+                                                          ordered_set,
+                                                          tcbdbtab } },
+                                                { type, set }),
+                                              { frag_properties, [ 
+                                                { node_pool, mnesia:system_info (running_db_nodes) },
+                                                { n_fragments, Frags },
+                                                ?if_mnesia_ext_and_tcerl (
+                                                  { n_external_copies, 1 },
+                                                  { n_ram_copies, 1 })
+                                                ] } ]),
+
+                    InitSize = entries (Tab),
+
+                    if Empty -> 
+                         Sizes = [];
+                       true ->
+                         Sizes = 
+                           [ begin
+                               mnesia:dirty_write (Tab, { Tab, Key, Value }),
+                               mnesia:dirty_write (TabDup, { Tab, Key, Value }),
+                               entries (Tab)
+                             end ||
+                             { Key, Value } <- Terms ]
+                    end,
+
+                    { ok, Pid } = 
+                       gen_expire_test:start_link 
+                         (1000,
+                          case { Keep, Empty } of
+                            { _, true } -> Frags * InitSize;
+                            { all, false } -> Frags * lists:last (Sizes);
+                            { none, false } -> Frags * InitSize;
+                            { _, false } -> Frags * lists:nth (Keep, Sizes)
+                          end,
+                          Tab,
+                          size,
+			  fun (T) ->
+			    (mnesia:table_info (T, size) rem 7) /= 0
+			  end),
+
+                    { ok, ExpPid } = gen_expire:force_run (Pid),
+                    { underway, ExpPid } = gen_expire:force_run (Pid),
+
+                    MRef = erlang:monitor (process, ExpPid),
+
+                    receive
+                      { 'DOWN', MRef, _, _, _ } -> ok
+                    end,
+
+		    S = fun (N) -> 7 * (N div 7) end,
+                    ?assert (entries (Tab) =:=
+                             case { Keep, Empty } of
+                               { _, true } -> S (InitSize);
+                               { all, false } -> S (lists:last (Sizes));
+                               { none, false } -> S (InitSize);
+                               { _, false } -> S (lists:nth (Keep, Sizes))
+                             end),
+
+                    ?assert (entries (TabDup) =:=
+                             entries (Tab)),
+
+                    gen_expire_test:stop (Pid),
+
+                    MRef2 = erlang:monitor (process, Pid),
+
+                    receive
+                      { 'DOWN', MRef2, _, _, _ } -> ok
+                    end,
+
+                    mnesia:delete_table (Tab),
+                    mnesia:delete_table (TabDup),
+
+                    true
+                  end) (X)),
+
+    ok = flasscheck (200, 10, T)
+  end,
+
+  { setup,
+    fun () -> os:cmd ("rm -rf Mnesia*"), 
+              ?if_mnesia_ext_and_tcerl (tcerl:start (), ok),
+              mnesia:start (),
+              ?if_mnesia_ext_and_tcerl (
+                mnesia:change_table_copy_type (schema, node (), disc_copies),
+                ok)
+    end,
+    fun (_) -> mnesia:stop (), 
+               ?if_mnesia_ext_and_tcerl (tcerl:stop (), ok),
+               os:cmd ("rm -rf Mnesia*") 
+    end,
+    { timeout, 60, F } 
+  }.
 
 -endif.

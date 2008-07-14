@@ -1,6 +1,7 @@
 Version 1.0.0:
   * support mnesiaex
   * support bytes or entries for limit spec
+  * support user-defined expiration policy
 
 Version 0.0.6:
   * appinspect hook.
