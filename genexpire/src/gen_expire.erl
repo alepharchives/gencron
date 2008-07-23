@@ -343,28 +343,32 @@ expire_frag_entries (Table, MaxFragEntries, UserExpire, State)
 expire_frag (Table, LimitFun, State) ->
   LockId = { { ?MODULE, Table }, self () },
 
-  global:set_lock (LockId),
-
-  try
-    { Context, NewState } = 
-      (State#genexpire.module):activity_context (Table, State#genexpire.state), 
-    mnesia:activity 
-      (Context,
-       fun () ->
-         First = (State#genexpire.module):first (Table, NewState),
-         
-         case First of
-           { end_of_table, NewState2 } -> 
-             State#genexpire{ state = NewState2 };
-           { ok, _, NewState2 } ->
-              expire_frag (Table,
-                           LimitFun,
-                           State#genexpire{ state = NewState2 },
-                           First)
-         end
-       end)
-  after
-    global:del_lock (LockId)
+  case global:set_lock (LockId, [ node () | nodes () ], 1) of
+    false -> 
+      ok;
+    true ->
+      try
+        { Context, NewState } = 
+          (State#genexpire.module):activity_context (Table,
+                                                     State#genexpire.state), 
+        mnesia:activity 
+          (Context,
+           fun () ->
+             First = (State#genexpire.module):first (Table, NewState),
+             
+             case First of
+               { end_of_table, NewState2 } -> 
+                 State#genexpire{ state = NewState2 };
+               { ok, _, NewState2 } ->
+                  expire_frag (Table,
+                               LimitFun,
+                               State#genexpire{ state = NewState2 },
+                               First)
+             end
+           end)
+      after
+        global:del_lock (LockId)
+      end
   end.
 
 expire_frag (_Table, _LimitFun, State, { end_of_table, _ }) ->
