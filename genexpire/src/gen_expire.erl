@@ -345,7 +345,7 @@ expire_frag (Table, LimitFun, State) ->
 
   case global:set_lock (LockId, [ node () | nodes () ], 1) of
     false -> 
-      ok;
+      State;
     true ->
       try
         { Context, NewState } = 
