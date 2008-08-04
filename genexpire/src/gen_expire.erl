@@ -343,7 +343,12 @@ expire_frag_entries (Table, MaxFragEntries, UserExpire, State)
 expire_frag (Table, LimitFun, State) ->
   LockId = { { ?MODULE, Table }, self () },
 
-  case global:set_lock (LockId, [ node () | nodes () ], 1) of
+  Nodes = case mnesia:table_info (Table, local_content) of 
+            true -> [ node () ];
+            false -> [ node () | nodes () ]
+          end,
+
+  case global:set_lock (LockId, Nodes, 1) of
     false -> 
       State;
     true ->
@@ -367,7 +372,7 @@ expire_frag (Table, LimitFun, State) ->
              end
            end)
       after
-        global:del_lock (LockId)
+        global:del_lock (LockId, Nodes)
       end
   end.
 
@@ -412,11 +417,12 @@ memory_bytes (Table) ->
   WordSize * mnesia:table_info (Table, memory).
 
 num_fragments (Tablename) ->
-  { value, { n_fragments, N } } =
-    lists:keysearch (n_fragments,
-                     1,
-                     mnesia:table_info (Tablename, frag_properties)),
-  N.
+  case lists:keysearch (n_fragments,
+                        1,
+                        mnesia:table_info (Tablename, frag_properties)) of
+    { value, { n_fragments, N } } -> N;
+    false -> 1
+  end.
 
 wrap ({ reply, Reply, NewState }, State) ->
   { reply, Reply, State#genexpire{ state = NewState } };

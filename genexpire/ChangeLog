@@ -1,3 +1,7 @@
+Version 1.0.3:
+  * allow non-fragmented tables to be expired
+  * don't lock on all nodes if local_content is true
+
 Version 1.0.2:
   * bugg fixx
 
